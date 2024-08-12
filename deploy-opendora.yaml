@@ -1,0 +1,54 @@
+name: "Deploy OpenDORA"
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/deploy-opendora.yml'
+
+env:
+  # Environment Variables for GCP and Helm
+  GCP_PROJECT_ID: ysr-devx-services-stg
+  GCP_CLUSTER_NAME: devx-gke
+  GCP_CLUSTER_ZONE: europe-west1-c
+  GHCR_PAT: ${{ secrets.GHCR_PAT }}
+  GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+  HELM_CHART: oci://ghcr.io/devoteamnl/opendora/open-dora-helm-chart
+  DB_ADDRESS: TO_BE_POPULATED
+  DB_USER: TO_BE_POPULATED
+  DB_PASS: TO_BE_POPULATED
+  DB_NAME: TO_BE_POPULATED
+
+jobs:
+  deploy_staging:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up GCloud SDK
+      uses: google-github-actions/setup-gcloud@v1
+      with:
+        project_id: ${{ env.GCP_PROJECT_ID }}
+        service_account_key: ${{ secrets.GCP_STAGING_SA_KEY }}
+
+    - name: Authenticate to GKE 
+      run: |
+        gcloud container clusters get-credentials ${{ env.GCP_CLUSTER_NAME }} --zone ${{ env.GCP_CLUSTER_ZONE }} --project ${{ env.GCP_PROJECT_ID }}
+
+    - name: Authenticate to GHCR
+      run: |
+        echo "${{ env.GHCR_PAT }}" | docker login ghcr.io -u ${{ env.GHCR_USERNAME }} --password-stdin
+
+    - name: Pull the Helm chart from GHCR
+      run: |
+        helm pull ${{ env.HELM_CHART }}
+
+    - name: Deploy OpenDORA API to Staging with Helm
+      run: |
+        helm upgrade --install opendora ${{ env.HELM_CHART }} \
+          --set openDora.devlakeDbAddress=${{ env.DB_ADDRESS }} \
+          --set openDora.devlakeDbUser=${{ env.DB_USER }} \
+          --set openDora.devlakeDbPass=${{ env.DB_PASS }} \
+          --set openDora.devlakeDbName=${{ env.DB_NAME }} \
+          --set imagePullSecrets[0].name=${{ env.IMAGE_PULL_SECRET }}
