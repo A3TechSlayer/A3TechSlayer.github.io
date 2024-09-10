@@ -1,0 +1,69 @@
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: The platform to execute on
+        type: string
+        default: linux-iac
+      directory:
+        description: The terraform plan output directory
+        type: string
+        default: .
+        required: false
+      soft-fail:
+        description: Toggle scan failure if vulnerabilities are found
+        type: boolean
+        default: false
+        required: false
+      timeout:
+        description: "Timeout (default 5m0s)"
+        type: string
+        required: false
+        default: "5m0s"
+      framework:
+        description: "IaC Type (default all)"
+        type: string
+        required: false
+        default: "all"
+
+jobs:
+  checkov:
+    runs-on: ${{ inputs.runs-on }}
+    name: "Checkov Scan"
+
+    steps:
+      - name: Download CDKTF Plan Output Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cdktf-plan-output
+          path: ${{ inputs.directory }}  # Download the artifact to the specified directory
+
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Run Checkov Scan
+        uses: bridgecrewio/checkov-action@v12.1347.0
+        with:
+          directory: ${{ inputs.directory }}  # Directory where the artifact was downloaded
+          quiet: true  # Display only failed checks
+          soft_fail: ${{ inputs.soft-fail }}  # Don't fail the job if vulnerabilities are found
+          framework: ${{ inputs.framework }}  # The framework to scan (default is terraform_json)
+          output_format: sarif  # The output format for results
+          download_external_modules: true  # Optional: Download external Terraform modules from public repositories
+          container_user: 1000  # Optional: Define what UID and GID to run the container under
+
+  slack-alert:
+    if: failure()
+    needs: checkov
+    runs-on: ${{ inputs.runs-on }}
+    continue-on-error: true
+    steps:
+      - name: Trigger Slack Notification
+        uses: rtCamp/action-slack-notify@v2.3.0
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_CHANNEL: github-security-alerts
+          SLACK_COLOR: ${{ needs.checkov.result }}
+          SLACK_MESSAGE: ":hammer_and_wrench: Checkov Scanner detected security issues."
+          SLACK_TITLE: Information
+          SLACK_FOOTER: "Powered by Yassir Security Team"
