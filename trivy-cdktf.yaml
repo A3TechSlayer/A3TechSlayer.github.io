@@ -1,0 +1,78 @@
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: The platform to execute on
+        type: string
+        default: linux-iac
+      directory:
+        description: The directory where the artifact is downloaded
+        type: string
+        default: .  # Defaults to current directory
+        required: false
+      severity:
+        description: The severity levels to check
+        type: string
+        default: "CRITICAL, HIGH"
+        required: false
+      scan-ref:
+        description: The target directory to scan (required)
+        type: string
+        required: true
+      exit-code:
+        description: Toggle failure if vulnerabilities are found
+        type: number
+        default: 1
+        required: false
+      skip-dirs:
+        description: Comma-separated list of directories to skip
+        type: string
+        required: false
+      timeout:
+        description: Timeout for the scan (default 5m0s)
+        type: string
+        default: "5m0s"
+        required: false
+
+jobs:
+  trivy-scan:
+    name: "Run Trivy Scan"
+    runs-on: ${{ inputs.runs-on }}
+
+    steps:
+      - name: Download CDKTF Plan Output Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cdktf-plan-output
+          path: ${{ inputs.directory }}  # Downloads artifact into specified directory
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Trivy Security Scan
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: "config"
+          scan-ref: ${{ inputs.scan-ref }}  # Directory where the scan should be performed
+          severity: ${{ inputs.severity }}
+          exit-code: ${{ inputs.exit-code }}
+          skip-dirs: ${{ inputs.skip-dirs }}
+          timeout: ${{ inputs.timeout }}
+
+  slack-alert:
+    if: failure()
+    needs: trivy-scan
+    runs-on: ${{ inputs.runs-on }}
+    continue-on-error: true
+    steps:
+      - name: Trigger Slack Notification
+        uses: rtCamp/action-slack-notify@v2.3.0
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_CHANNEL: github-security-alerts
+          SLACK_COLOR: ${{ needs.trivy-scan.result }}
+          SLACK_MESSAGE: ":hammer_and_wrench: Trivy Scanner detected security issues."
+          SLACK_TITLE: Information
+          SLACK_FOOTER: "Powered by Yassir Security Team"
